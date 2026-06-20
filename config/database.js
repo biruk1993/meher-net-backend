@@ -2,11 +2,11 @@ const { Pool } = require('pg');
 require('dotenv').config();
 
 const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
+  user: process.env.DB_USER || 'admin',
+  host: process.env.DB_HOST || 'dpg-d8r25nflk1mc73bahup0-a.oregon-postgres.render.com',
+  database: process.env.DB_NAME || 'meher_net',
+  password: process.env.DB_PASSWORD || 'hTdMzpaEUHcNShsE18XtJJoOvFQCBueL',
+  port: process.env.DB_PORT || 5432,
   ssl: {
     rejectUnauthorized: false
   }
@@ -16,10 +16,9 @@ async function initializeDatabase() {
   const client = await pool.connect();
   
   try {
-    console.log('Checking database...');
+    console.log('Creating database tables...');
 
     await client.query(`
-      -- Admins table
       CREATE TABLE IF NOT EXISTS admins (
         id VARCHAR(8) PRIMARY KEY,
         full_name VARCHAR(100) NOT NULL,
@@ -30,7 +29,6 @@ async function initializeDatabase() {
         last_login TIMESTAMP
       );
 
-      -- Pending info providers
       CREATE TABLE IF NOT EXISTS info_providers_pending (
         id VARCHAR(8) PRIMARY KEY,
         added_by_admin_id VARCHAR(8),
@@ -39,7 +37,6 @@ async function initializeDatabase() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      -- Registered info providers
       CREATE TABLE IF NOT EXISTS info_providers (
         id VARCHAR(8) PRIMARY KEY,
         full_name VARCHAR(100) NOT NULL,
@@ -51,7 +48,6 @@ async function initializeDatabase() {
         status VARCHAR(20) DEFAULT 'active'
       );
 
-      -- Chat messages
       CREATE TABLE IF NOT EXISTS chat_messages (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         sender_id VARCHAR(8) NOT NULL,
@@ -67,7 +63,6 @@ async function initializeDatabase() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      -- Information threads
       CREATE TABLE IF NOT EXISTS information_threads (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         info_provider_id VARCHAR(8) NOT NULL,
@@ -78,7 +73,6 @@ async function initializeDatabase() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      -- Excel upload history
       CREATE TABLE IF NOT EXISTS batch_uploads (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         admin_id VARCHAR(8),
@@ -92,7 +86,7 @@ async function initializeDatabase() {
 
     console.log('Tables ready!');
 
-    // Check if admins already exist
+    // Check if admins exist
     const adminCheck = await client.query('SELECT COUNT(*) FROM admins');
     
     if (parseInt(adminCheck.rows[0].count) === 0) {
@@ -101,7 +95,6 @@ async function initializeDatabase() {
       const bcrypt = require('bcryptjs');
       const salt = await bcrypt.genSalt(10);
       
-      // Fixed passwords
       const password1 = await bcrypt.hash('Admin@123', salt);
       const password2 = await bcrypt.hash('Admin@456', salt);
       const password3 = await bcrypt.hash('Admin@789', salt);
@@ -115,8 +108,6 @@ async function initializeDatabase() {
       );
       
       console.log('Default admins created!');
-    } else {
-      console.log('Admins already exist, skipping creation.');
     }
 
     console.log('Admin IDs: 20809915, 00000001, 00000002');
