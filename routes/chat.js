@@ -47,6 +47,7 @@ router.get('/messages/:userId', async (req, res) => {
 
     res.json({ success: true, messages: messages.rows });
   } catch (error) {
+    console.error('Get messages error:', error);
     res.status(500).json({ success: false, message: 'Error loading messages' });
   }
 });
@@ -60,41 +61,48 @@ router.post('/send', upload.single('file'), async (req, res) => {
     let fileUrl = null;
     let fileName = null;
     let fileSize = null;
-    let mimeType = null;
 
     if (req.file) {
-      // Build proper URL path
-      const subFolder = req.file.destination.replace('uploads/', '');
+      // Build proper URL path - fix double slash
+      let subFolder = '';
+      if (req.file.destination.includes('uploads/')) {
+        subFolder = req.file.destination.split('uploads/')[1];
+      } else {
+        subFolder = path.basename(req.file.destination);
+      }
+      subFolder = subFolder.replace(/\\/g, '/').replace(/\/\//g, '/');
       fileUrl = '/uploads/' + subFolder + '/' + req.file.filename;
+      fileUrl = fileUrl.replace(/\/\//g, '/'); // Remove any double slashes
       fileName = req.file.originalname;
       fileSize = req.file.size;
-      mimeType = req.file.mimetype;
     }
+
+    const finalMessageType = req.file ? 'file' : (messageType || 'text');
+    const finalContent = messageContent || '';
 
     const result = await pool.query(
       `INSERT INTO chat_messages 
        (sender_id, receiver_id, message_type, message_content, file_url, file_name, file_size, location_lat, location_lng)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [senderId, receiverId, messageType || (req.file ? 'file' : 'text'), 
-       messageContent || '', fileUrl, fileName, fileSize,
+      [senderId, receiverId, finalMessageType, finalContent, 
+       fileUrl, fileName, fileSize,
        locationLat || null, locationLng || null]
     );
 
     const message = result.rows[0];
 
-    // Emit to both users via socket
+    // Emit to receiver via socket (not sender - they already have it locally)
     const io = req.app.get('io');
     if (io) {
-     // Only send to receiver, sender already has it locally
-     io.to(receiverId).emit('new-message', message);
+      io.to(receiverId).emit('new-message', message);
     }
 
     // Update thread
     const providerId = req.user.role === 'provider' ? senderId : receiverId;
     const adminId = req.user.role === 'admin' ? senderId : receiverId;
     
-    let threadMsg = messageContent || '';
+    let threadMsg = finalContent || '';
     if (req.file) threadMsg = '📎 ' + fileName;
     
     await pool.query(
@@ -121,6 +129,7 @@ router.delete('/clear/:userId', async (req, res) => {
     );
     res.json({ success: true, message: 'Chat cleared' });
   } catch (error) {
+    console.error('Clear chat error:', error);
     res.status(500).json({ success: false, message: 'Failed to clear' });
   }
 });
