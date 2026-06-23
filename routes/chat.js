@@ -86,8 +86,8 @@ router.post('/send', upload.single('file'), async (req, res) => {
     // Emit to both users via socket
     const io = req.app.get('io');
     if (io) {
-      io.to(receiverId).emit('new-message', message);
-      io.to(senderId).emit('new-message', message);
+     // Only send to receiver, sender already has it locally
+     io.to(receiverId).emit('new-message', message);
     }
 
     // Update thread
