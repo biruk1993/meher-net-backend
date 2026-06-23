@@ -67,8 +67,8 @@ io.on('connection', (socket) => {
       
       const message = result.rows[0];
       
-      io.to(receiverId).emit('new-message', message);
-      io.to(senderId).emit('message-sent', message);
+// Only send to receiver, sender already has it locally
+io.to(receiverId).emit('new-message', message);
       
       // Update thread
       await pool.query(
