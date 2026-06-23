@@ -5,11 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const { pool } = require('../config/database');
 
-// Ensure upload directories exist
 const dirs = ['uploads/images', 'uploads/videos', 'uploads/pdfs', 'uploads/documents'];
-dirs.forEach(dir => {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-});
+dirs.forEach(dir => { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); });
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -42,7 +39,6 @@ router.get('/messages/:userId', async (req, res) => {
       [currentUserId, otherUserId]
     );
 
-    // Mark as read
     await pool.query(
       `UPDATE chat_messages SET is_read = TRUE 
        WHERE sender_id = $1 AND receiver_id = $2 AND is_read = FALSE`,
@@ -51,12 +47,11 @@ router.get('/messages/:userId', async (req, res) => {
 
     res.json({ success: true, messages: messages.rows });
   } catch (error) {
-    console.error('Get messages error:', error);
-    res.status(500).json({ success: false, message: 'Failed to load messages' });
+    res.status(500).json({ success: false, message: 'Error loading messages' });
   }
 });
 
-// POST send message (with file)
+// POST send message with file
 router.post('/send', upload.single('file'), async (req, res) => {
   try {
     const { receiverId, messageType, messageContent, locationLat, locationLng } = req.body;
@@ -65,11 +60,15 @@ router.post('/send', upload.single('file'), async (req, res) => {
     let fileUrl = null;
     let fileName = null;
     let fileSize = null;
+    let mimeType = null;
 
     if (req.file) {
-      fileUrl = '/uploads/' + path.basename(req.file.path);
+      // Build proper URL path
+      const subFolder = req.file.destination.replace('uploads/', '');
+      fileUrl = '/uploads/' + subFolder + '/' + req.file.filename;
       fileName = req.file.originalname;
       fileSize = req.file.size;
+      mimeType = req.file.mimetype;
     }
 
     const result = await pool.query(
@@ -77,13 +76,14 @@ router.post('/send', upload.single('file'), async (req, res) => {
        (sender_id, receiver_id, message_type, message_content, file_url, file_name, file_size, location_lat, location_lng)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [senderId, receiverId, messageType || 'text', messageContent || '', 
-       fileUrl, fileName, fileSize, locationLat || null, locationLng || null]
+      [senderId, receiverId, messageType || (req.file ? 'file' : 'text'), 
+       messageContent || '', fileUrl, fileName, fileSize,
+       locationLat || null, locationLng || null]
     );
 
     const message = result.rows[0];
 
-    // Emit to both users
+    // Emit to both users via socket
     const io = req.app.get('io');
     if (io) {
       io.to(receiverId).emit('new-message', message);
@@ -94,38 +94,34 @@ router.post('/send', upload.single('file'), async (req, res) => {
     const providerId = req.user.role === 'provider' ? senderId : receiverId;
     const adminId = req.user.role === 'admin' ? senderId : receiverId;
     
+    let threadMsg = messageContent || '';
+    if (req.file) threadMsg = '📎 ' + fileName;
+    
     await pool.query(
       `INSERT INTO information_threads (info_provider_id, admin_id, last_message, last_message_time)
        VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
        ON CONFLICT (info_provider_id) 
        DO UPDATE SET last_message = $3, last_message_time = CURRENT_TIMESTAMP`,
-      [providerId, adminId, messageContent || '📎 File']
+      [providerId, adminId, threadMsg]
     );
 
     res.json({ success: true, message });
   } catch (error) {
-    console.error('Send message error:', error);
-    res.status(500).json({ success: false, message: 'Failed to send message' });
+    console.error('Send error:', error);
+    res.status(500).json({ success: false, message: 'Failed to send' });
   }
 });
 
-// DELETE clear chat
+// Clear chat
 router.delete('/clear/:userId', async (req, res) => {
   try {
-    const currentUserId = req.user.id;
-    const otherUserId = req.params.userId;
-
     await pool.query(
-      `DELETE FROM chat_messages
-       WHERE (sender_id = $1 AND receiver_id = $2)
-          OR (sender_id = $2 AND receiver_id = $1)`,
-      [currentUserId, otherUserId]
+      `DELETE FROM chat_messages WHERE (sender_id = $1 AND receiver_id = $2) OR (sender_id = $2 AND receiver_id = $1)`,
+      [req.user.id, req.params.userId]
     );
-
     res.json({ success: true, message: 'Chat cleared' });
   } catch (error) {
-    console.error('Clear chat error:', error);
-    res.status(500).json({ success: false, message: 'Failed to clear chat' });
+    res.status(500).json({ success: false, message: 'Failed to clear' });
   }
 });
 
